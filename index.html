@@ -737,11 +737,40 @@
       font-weight: 700;
       color: var(--accent);
     }
+    .lr-time {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--accent3);
+      white-space: nowrap;
+      min-width: 60px;
+      text-align: right;
+    }
     .lr-attempts {
       font-size: 0.78rem;
       color: var(--text2);
       white-space: nowrap;
     }
+    /* 랜딩 랭킹 탭 버튼 */
+    .lr-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .lr-tab {
+      padding: 5px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text2);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s;
+      font-family: 'Noto Sans KR', sans-serif;
+    }
+    .lr-tab:hover { border-color: var(--accent); color: var(--accent); }
+    .lr-tab.active { background: rgba(0,212,255,0.15); border-color: var(--accent); color: var(--accent); }
     .lr-empty {
       padding: 32px;
       text-align: center;
@@ -790,21 +819,30 @@
       const snap = await get(ref(db, 'users'));
       return snap.exists() ? snap.val() : {};
     },
-    // 랭킹 저장 (userId 기준 upsert)
-    async setRanking(userId, data) {
-      await set(ref(db, `rankings/${userId}`), data);
+    // 랭킹 저장 (카운트별 경로)
+    async setRanking(userId, data, countKey) {
+      await set(ref(db, `rankings/${countKey}/${userId}`), data);
     },
-    // 전체 랭킹 조회
-    async getAllRankings() {
-      const snap = await get(ref(db, 'rankings'));
+    // 특정 카운트 랭킹 조회
+    async getRankingsByCount(countKey) {
+      const snap = await get(ref(db, `rankings/${countKey}`));
       if (!snap.exists()) return [];
       return Object.values(snap.val()).sort((a,b) =>
-        b.score - a.score || b.correct - a.correct
+        b.score - a.score || a.elapsed - b.elapsed
       );
     },
-    // 랭킹 삭제
+    // 전체 카운트 랭킹 조회 (하위 호환)
+    async getAllRankings() {
+      const snap = await get(ref(db, 'rankings/all'));
+      if (!snap.exists()) return [];
+      return Object.values(snap.val()).sort((a,b) =>
+        b.score - a.score || a.elapsed - b.elapsed
+      );
+    },
+    // 특정 사용자 모든 카운트 랭킹 삭제
     async deleteRanking(userId) {
-      await remove(ref(db, `rankings/${userId}`));
+      const keys = ['5','10','20','all'];
+      await Promise.all(keys.map(k => remove(ref(db, `rankings/${k}/${userId}`))));
     },
     // 퀴즈 데이터 저장 (관리자)
     async setQuizData(data) {
@@ -855,6 +893,13 @@
         <span class="live-dot"></span>
         <span class="live-title">실시간 랭킹 현황</span>
         <span class="live-time" id="landing-time"></span>
+      </div>
+      <!-- 랜딩 랭킹 카운트 탭 -->
+      <div class="lr-tabs">
+        <button class="lr-tab active" data-key="5"   onclick="switchLandingRankTab('5')">5문제</button>
+        <button class="lr-tab"        data-key="10"  onclick="switchLandingRankTab('10')">10문제</button>
+        <button class="lr-tab"        data-key="20"  onclick="switchLandingRankTab('20')">20문제</button>
+        <button class="lr-tab"        data-key="all" onclick="switchLandingRankTab('all')">전체</button>
       </div>
       <div id="landing-ranking-list" class="landing-ranking-list">
         <div class="landing-ranking-loading">불러오는 중...</div>
@@ -1073,8 +1118,15 @@
         <h2>🏆 랭킹</h2>
         <button class="btn btn-secondary btn-sm" onclick="loadRankings()">새로고침</button>
       </div>
-      <div class="alert alert-info">전체 퀴즈 기준 최고 점수가 반영됩니다.</div>
+      <!-- 카운트 탭 -->
+      <div class="tabs ranking-tabs" style="margin-bottom:20px">
+        <div class="tab active" id="rtab-5"  onclick="switchRankingTab('5')">5문제</div>
+        <div class="tab"        id="rtab-10" onclick="switchRankingTab('10')">10문제</div>
+        <div class="tab"        id="rtab-20" onclick="switchRankingTab('20')">20문제</div>
+        <div class="tab"        id="rtab-all" onclick="switchRankingTab('all')">전체(50)</div>
+      </div>
       <div id="ranking-content">
+        <div style="overflow-x:auto">
         <table class="ranking-table">
           <thead>
             <tr>
@@ -1082,12 +1134,14 @@
               <th>닉네임</th>
               <th>최고 점수</th>
               <th>정답률</th>
-              <th>도전 횟수</th>
+              <th>풀이시간</th>
+              <th>도전횟수</th>
             </tr>
           </thead>
           <tbody id="ranking-tbody"></tbody>
         </table>
-        <p id="no-ranking" class="text-center text-muted mt-8" style="display:none">아직 랭킹 데이터가 없습니다.</p>
+        </div>
+        <p id="no-ranking" class="text-center text-muted mt-8" style="display:none">이 카테고리의 랭킹 데이터가 없습니다.</p>
       </div>
     </div>
   </div>
@@ -1544,36 +1598,46 @@ async function finishQuiz() {
   const score = Math.round((correct / total) * 100);
   
   if (state.currentUser && !state.isAdmin && answered.length === total) {
-    await saveUserResult(score, correct, total);
+    await saveUserResult(score, correct, total, elapsed);
   }
   
   showResults(score, correct, total, elapsed);
 }
 
-async function saveUserResult(score, correct, total) {
+async function saveUserResult(score, correct, total, elapsed) {
   const userId = state.currentUser.id;
+  // 카운트 키: 5, 10, 20, all(전체)
+  const countKey = (total >= 50 || state.selectedCount === 'all') ? 'all'
+                 : String(total);
+
   try {
     // 도전 횟수 업데이트
     const user = await window.FB.getUser(userId);
     if (user) {
       await window.FB.updateUser(userId, { attempts: (user.attempts || 0) + 1 });
     }
-    // 랭킹 upsert (최고점수만 보존)
-    const existingSnap = await window.FB.getAllRankings();
-    const existing = existingSnap.find(r => r.userId === userId);
+    // 해당 카운트 기존 랭킹 조회
+    const existing_list = await window.FB.getRankingsByCount(countKey);
+    const existing = existing_list.find(r => r.userId === userId);
     const attempts = existing ? (existing.attempts || 1) + 1 : 1;
-    const bestScore = existing && existing.score > score ? existing.score : score;
-    const bestCorrect = existing && existing.score > score ? existing.correct : correct;
-    const bestTotal = existing && existing.score > score ? existing.total : total;
-    await window.FB.setRanking(userId, {
+
+    // 최고 점수가 높거나, 같은 점수면 더 빠른 시간 보존
+    const isBetter = !existing
+      || score > existing.score
+      || (score === existing.score && elapsed < (existing.elapsed || Infinity));
+
+    const record = {
       userId,
       nickname: state.currentUser.nickname,
-      score: bestScore,
-      correct: bestCorrect,
-      total: bestTotal,
+      score:   isBetter ? score   : existing.score,
+      correct: isBetter ? correct : existing.correct,
+      total:   isBetter ? total   : existing.total,
+      elapsed: isBetter ? elapsed : existing.elapsed,
       attempts,
       date: new Date().toISOString()
-    });
+    };
+
+    await window.FB.setRanking(userId, record, countKey);
   } catch(e) { console.error('랭킹 저장 오류:', e); }
 }
 
@@ -1638,16 +1702,38 @@ function showResults(score, correct, total, elapsed) {
 }
 
 // ============ RANKING ============
-async function loadRankings() {
+let _currentRankingTab = '5';
+
+function switchRankingTab(key) {
+  _currentRankingTab = key;
+  ['5','10','20','all'].forEach(k => {
+    const t = document.getElementById(`rtab-${k}`);
+    if (t) t.classList.toggle('active', k === key);
+  });
+  loadRankingsByTab(key);
+}
+
+function loadRankings() {
+  loadRankingsByTab(_currentRankingTab);
+}
+
+function fmtElapsed(sec) {
+  if (!sec && sec !== 0) return '-';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}분 ${String(s).padStart(2,'0')}초` : `${s}초`;
+}
+
+async function loadRankingsByTab(countKey) {
   const tbody = document.getElementById('ranking-tbody');
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">불러오는 중...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">불러오는 중...</td></tr>';
   document.getElementById('no-ranking').style.display = 'none';
   
   try {
-    const rankings = await window.FB.getAllRankings();
+    const rankings = await window.FB.getRankingsByCount(countKey);
     tbody.innerHTML = '';
     
-    if (rankings.length === 0) {
+    if (!rankings || rankings.length === 0) {
       document.getElementById('no-ranking').style.display = 'block';
       return;
     }
@@ -1663,12 +1749,13 @@ async function loadRankings() {
         <td>${r.nickname}${isMe ? ' <small style="color:var(--accent)">(나)</small>' : ''}</td>
         <td><strong style="color:var(--accent);font-family:'Space Mono',monospace">${r.score}</strong>점</td>
         <td>${r.correct}/${r.total} (${Math.round(r.correct/r.total*100)}%)</td>
+        <td style="font-family:'Space Mono',monospace;font-size:0.82rem;color:var(--accent3)">${fmtElapsed(r.elapsed)}</td>
         <td>${r.attempts || 1}회</td>
       `;
       tbody.appendChild(tr);
     });
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--error);padding:20px">랭킹을 불러오지 못했습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--error);padding:20px">랭킹을 불러오지 못했습니다.</td></tr>';
   }
 }
 
@@ -1911,29 +1998,41 @@ function startLandingClock() {
   _landingClockInterval = setInterval(tick, 1000);
 }
 
+// 랜딩 랭킹 탭 상태
+let _landingRankTab = '5';
+
+function switchLandingRankTab(key) {
+  _landingRankTab = key;
+  document.querySelectorAll('.lr-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.key === key);
+  });
+  loadLandingRanking();
+}
+
 async function loadLandingRanking() {
   const listEl = document.getElementById('landing-ranking-list');
   if (!listEl) return;
   try {
-    const rankings = await window.FB.getAllRankings();
+    const rankings = await window.FB.getRankingsByCount(_landingRankTab);
     if (!rankings || rankings.length === 0) {
-      listEl.innerHTML = '<div class="lr-empty">아직 등록된 랭킹이 없습니다.<br>첫 번째 도전자가 되어보세요! 🚀</div>';
+      listEl.innerHTML = '<div class="lr-empty">이 카테고리의 랭킹이 없습니다.<br>첫 번째 도전자가 되어보세요! 🚀</div>';
       return;
     }
     const medals = ['r1','r2','r3'];
-    let html = '';
+    let out = '';
     rankings.slice(0, 10).forEach((r, i) => {
       const rank = i + 1;
       const cls  = medals[i] || 'rn';
       const icon = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank;
-      html += `<div class="landing-rank-row">
+      out += `<div class="landing-rank-row">
         <div class="lr-rank ${cls}">${icon}</div>
         <div class="lr-nick">${r.nickname}</div>
         <div class="lr-score">${r.score}점</div>
-        <div class="lr-attempts">${r.attempts || 1}회 도전</div>
+        <div class="lr-time">${fmtElapsed(r.elapsed)}</div>
+        <div class="lr-attempts">${r.attempts || 1}회</div>
       </div>`;
     });
-    listEl.innerHTML = html;
+    listEl.innerHTML = out;
   } catch(e) {
     listEl.innerHTML = '<div class="lr-empty" style="color:var(--error)">랭킹을 불러오지 못했습니다.</div>';
   }
