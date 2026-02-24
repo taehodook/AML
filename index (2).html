@@ -650,6 +650,104 @@
       cursor: pointer;
     }
     .agree-item span { line-height: 1.4; }
+
+    /* Live Ranking on Landing */
+    .live-ranking-section {
+      margin: 32px 0 48px;
+    }
+    .live-ranking-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .live-dot {
+      width: 10px;
+      height: 10px;
+      background: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 0 3px rgba(16,185,129,0.25);
+      animation: pulse 1.6s infinite;
+      flex-shrink: 0;
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 3px rgba(16,185,129,0.25); }
+      50%      { box-shadow: 0 0 0 7px rgba(16,185,129,0.05); }
+    }
+    .live-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .live-time {
+      margin-left: auto;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--text2);
+    }
+    .landing-ranking-list {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .landing-ranking-loading {
+      padding: 24px;
+      text-align: center;
+      color: var(--text2);
+      font-size: 0.9rem;
+    }
+    .landing-rank-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 13px 20px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .landing-rank-row:last-child { border-bottom: none; }
+    .landing-rank-row:hover { background: var(--bg3); }
+    .lr-rank {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    .lr-rank.r1 { background: rgba(251,191,36,0.15); color: #f59e0b; border: 1px solid rgba(251,191,36,0.4); }
+    .lr-rank.r2 { background: rgba(148,163,184,0.15); color: #94a3b8; border: 1px solid rgba(148,163,184,0.4); }
+    .lr-rank.r3 { background: rgba(205,127,50,0.15);  color: #cd7f32; border: 1px solid rgba(205,127,50,0.4); }
+    .lr-rank.rn { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+    .lr-nick {
+      flex: 1;
+      font-size: 0.92rem;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lr-score {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .lr-attempts {
+      font-size: 0.78rem;
+      color: var(--text2);
+      white-space: nowrap;
+    }
+    .lr-empty {
+      padding: 32px;
+      text-align: center;
+      color: var(--text2);
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
@@ -751,27 +849,18 @@
         <button class="btn btn-secondary" onclick="showScreen('login'); switchTab('admin-login')" style="font-size:1rem;padding:14px 36px;">⚙️ 관리자</button>
       </div>
     </div>
-    <div class="feature-grid">
-      <div class="feature-card">
-        <div class="feature-icon">📚</div>
-        <h3>50문제 실전 퀴즈</h3>
-        <p>TPAC 공식 교재(제도편, 실무편) 기반의 양질의 문제로 구성되어 있습니다.</p>
+    <!-- 실시간 랭킹 현황 -->
+    <div class="live-ranking-section">
+      <div class="live-ranking-header">
+        <span class="live-dot"></span>
+        <span class="live-title">실시간 랭킹 현황</span>
+        <span class="live-time" id="landing-time"></span>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">🏆</div>
-        <h3>실시간 랭킹</h3>
-        <p>회원들의 최종 점수를 비교하고 실력을 경쟁해보세요.</p>
+      <div id="landing-ranking-list" class="landing-ranking-list">
+        <div class="landing-ranking-loading">불러오는 중...</div>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">📊</div>
-        <h3>틀린 문제 분석</h3>
-        <p>퀴즈 완료 후 틀린 문제의 정답과 해설을 확인할 수 있습니다.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">⚙️</div>
-        <h3>관리자 퀴즈 업데이트</h3>
-        <p>관리자는 새로운 문제 파일을 업로드하여 퀴즈 데이터를 업데이트할 수 있습니다.</p>
-      </div>
+    </div>
+
     </div>
   </div>
 </div>
@@ -1245,6 +1334,7 @@ function showScreen(name) {
   state.currentScreen = name;
   if (name === 'ranking') loadRankings();
   if (name === 'admin') loadAdminQuizList();
+  if (name === 'landing') { loadLandingRanking(); startLandingClock(); }
   window.scrollTo(0, 0);
 }
 
@@ -1724,36 +1814,52 @@ async function applyJson() {
 
 async function loadMembersList() {
   const container = document.getElementById('members-list');
-  container.innerHTML = '<p class="text-muted text-center">불러오는 중...</p>';
+  container.innerHTML = '<p class="text-muted text-center" style="padding:20px">불러오는 중...</p>';
   
   try {
-    const [users, rankings] = await Promise.all([
-      window.FB.getAllUsers(),
-      window.FB.getAllRankings()
-    ]);
-    const entries = Object.entries(users);
+    const usersObj = await window.FB.getAllUsers();
+    const rankings = await window.FB.getAllRankings();
+    
+    // Firebase 반환값이 null/undefined 이면 빈 객체
+    const entries = Object.entries(usersObj || {});
+    
     if (entries.length === 0) {
-      container.innerHTML = '<p class="text-muted text-center">등록된 회원이 없습니다.</p>';
+      container.innerHTML = '<p class="text-muted text-center" style="padding:20px">등록된 회원이 없습니다.</p>';
       return;
     }
+    
+    // 테이블 HTML 생성
+    let rows = '';
+    for (const [id, u] of entries) {
+      const r = rankings.find(r => r.userId === id);
+      const joinDate = u.joinDate ? new Date(u.joinDate).toLocaleDateString('ko-KR') : '-';
+      rows += `<tr>
+        <td><span style="font-family:'Space Mono',monospace;font-size:0.85rem">${id}</span></td>
+        <td>${u.nickname || '-'}</td>
+        <td><span style="font-size:0.8rem;color:var(--text2)">${joinDate}</span></td>
+        <td>${u.attempts || 0}회</td>
+        <td>${r ? '<strong style=\'color:var(--accent)\'>' + r.score + '점</strong>' : '-'}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteUser('${id}')">삭제</button></td>
+      </tr>`;
+    }
+    
     container.innerHTML = `
+      <div style="margin-bottom:12px;color:var(--text2);font-size:0.85rem">총 <strong style="color:var(--text)">${entries.length}명</strong>의 회원이 있습니다.</div>
+      <div style="overflow-x:auto">
       <table class="ranking-table">
-        <thead><tr><th>아이디</th><th>닉네임</th><th>가입일</th><th>도전횟수</th><th>최고점수</th><th>관리</th></tr></thead>
-        <tbody>${entries.map(([id, u]) => {
-          const r = rankings.find(r => r.userId === id);
-          return `<tr>
-            <td><span style="font-family:'Space Mono',monospace;font-size:0.85rem">${id}</span></td>
-            <td>${u.nickname}</td>
-            <td><span style="font-size:0.8rem;color:var(--text2)">${u.joinDate ? new Date(u.joinDate).toLocaleDateString('ko') : '-'}</span></td>
-            <td>${u.attempts || 0}회</td>
-            <td>${r ? r.score + '점' : '-'}</td>
-            <td><button class="btn btn-danger btn-sm" onclick="deleteUser('${id}')">삭제</button></td>
-          </tr>`;
-        }).join('')}</tbody>
+        <thead>
+          <tr>
+            <th>아이디</th><th>닉네임</th><th>가입일</th>
+            <th>도전횟수</th><th>최고점수</th><th>관리</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
       </table>
+      </div>
     `;
   } catch(e) {
-    container.innerHTML = '<p class="text-muted text-center" style="color:var(--error)">회원 목록을 불러오지 못했습니다.</p>';
+    console.error('Members load error:', e);
+    container.innerHTML = `<div class="alert alert-error">회원 목록을 불러오지 못했습니다.<br><small>${e.message}</small></div>`;
   }
 }
 
@@ -1785,6 +1891,54 @@ async function simpleHash(str) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
+
+// ============ LANDING LIVE RANKING ============
+let _landingClockInterval = null;
+
+function startLandingClock() {
+  const el = document.getElementById('landing-time');
+  if (!el) return;
+  const tick = () => {
+    const now = new Date();
+    el.textContent = now.toLocaleString('ko-KR', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+  };
+  tick();
+  clearInterval(_landingClockInterval);
+  _landingClockInterval = setInterval(tick, 1000);
+}
+
+async function loadLandingRanking() {
+  const listEl = document.getElementById('landing-ranking-list');
+  if (!listEl) return;
+  try {
+    const rankings = await window.FB.getAllRankings();
+    if (!rankings || rankings.length === 0) {
+      listEl.innerHTML = '<div class="lr-empty">아직 등록된 랭킹이 없습니다.<br>첫 번째 도전자가 되어보세요! 🚀</div>';
+      return;
+    }
+    const medals = ['r1','r2','r3'];
+    let html = '';
+    rankings.slice(0, 10).forEach((r, i) => {
+      const rank = i + 1;
+      const cls  = medals[i] || 'rn';
+      const icon = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank;
+      html += `<div class="landing-rank-row">
+        <div class="lr-rank ${cls}">${icon}</div>
+        <div class="lr-nick">${r.nickname}</div>
+        <div class="lr-score">${r.score}점</div>
+        <div class="lr-attempts">${r.attempts || 1}회 도전</div>
+      </div>`;
+    });
+    listEl.innerHTML = html;
+  } catch(e) {
+    listEl.innerHTML = '<div class="lr-empty" style="color:var(--error)">랭킹을 불러오지 못했습니다.</div>';
+  }
+}
+
 // ============ LOADING OVERLAY ============
 function setLoading(on, msg = '처리 중...') {
   let overlay = document.getElementById('loading-overlay');
@@ -1814,12 +1968,16 @@ function setLoading(on, msg = '처리 중...') {
 // ============ INIT ============
 document.addEventListener('DOMContentLoaded', () => {
   updateHeader();
-  // Firebase 준비 대기
-  if (window.FB) {
-    console.log('Firebase ready');
-  } else {
-    window.addEventListener('firebase-ready', () => console.log('Firebase ready'));
-  }
+  startLandingClock();
+  // Firebase 준비 후 랜딩 랭킹 로드
+  const tryLoad = () => {
+    if (window.FB) {
+      loadLandingRanking();
+    } else {
+      window.addEventListener('firebase-ready', loadLandingRanking, { once: true });
+    }
+  };
+  tryLoad();
 });
 </script>
 </body>
