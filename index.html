@@ -777,7 +777,14 @@
       color: var(--text2);
       font-size: 0.9rem;
     }
+
+    .ranking-reset-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:8px; }
+    .reset-card { background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:20px 16px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; }
+    .reset-card-label { font-size:0.88rem; color:var(--text2); font-weight:600; }
+    .reset-card-count { font-family:'Space Mono',monospace; font-size:1.6rem; font-weight:700; color:var(--accent); }
   </style>
+  <!-- SheetJS for Excel parsing/export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -843,6 +850,20 @@
     async deleteRanking(userId) {
       const keys = ['5','10','20','all'];
       await Promise.all(keys.map(k => remove(ref(db, `rankings/${k}/${userId}`))));
+    },
+    // 특정 카운트 전체 랭킹 리셋
+    async resetRankingByCount(countKey) {
+      await remove(ref(db, `rankings/${countKey}`));
+    },
+    // 전체 랭킹 리셋
+    async resetAllRankings() {
+      await remove(ref(db, 'rankings'));
+    },
+    // 카운트별 인원 수 조회
+    async getRankingCount(countKey) {
+      const snap = await get(ref(db, `rankings/${countKey}`));
+      if (!snap.exists()) return 0;
+      return Object.keys(snap.val()).length;
     },
     // 퀴즈 데이터 저장 (관리자)
     async setQuizData(data) {
@@ -1153,9 +1174,10 @@
     <div class="card">
       <h2>⚙️ 관리자 패널</h2>
       <div class="tabs admin-tabs">
-        <div class="tab active" id="atab-quiz" onclick="switchAdminTab('quiz')">문제 관리</div>
-        <div class="tab" id="atab-upload" onclick="switchAdminTab('upload')">문제 업로드</div>
-        <div class="tab" id="atab-members" onclick="switchAdminTab('members')">회원 관리</div>
+        <div class="tab active" id="atab-quiz"    onclick="switchAdminTab('quiz')">문제 관리</div>
+        <div class="tab"        id="atab-upload"  onclick="switchAdminTab('upload')">문제 업로드</div>
+        <div class="tab"        id="atab-members" onclick="switchAdminTab('members')">회원 관리</div>
+        <div class="tab"        id="atab-ranking-mgmt" onclick="switchAdminTab('ranking-mgmt')">랭킹 관리</div>
       </div>
 
       <!-- Quiz Management -->
@@ -1169,26 +1191,92 @@
 
       <!-- Upload -->
       <div id="admin-upload" style="display:none">
-        <div class="alert alert-info">JSON 형식의 퀴즈 파일을 업로드하거나 직접 붙여넣기 할 수 있습니다.</div>
-        <div class="upload-area" onclick="document.getElementById('quiz-file-input').click()">
-          <div class="upload-icon">📁</div>
-          <div class="upload-text">JSON 파일을 클릭하여 업로드<br><small>또는 아래에 직접 입력</small></div>
-          <input type="file" id="quiz-file-input" accept=".json" style="display:none" onchange="handleFileUpload(event)">
+        <!-- 업로드 방식 탭 -->
+        <div class="tabs" style="margin-bottom:20px">
+          <div class="tab active" id="utab-excel" onclick="switchUploadTab('excel')">📊 엑셀 업로드</div>
+          <div class="tab"        id="utab-json"  onclick="switchUploadTab('json')">{ } JSON 업로드</div>
         </div>
-        <div class="form-group">
-          <label>JSON 직접 입력</label>
-          <textarea id="json-paste" rows="10" placeholder='[{"id":1,"question":"문제 내용","options":["①","②","③","④","⑤"],"answer":0,"explanation":"해설","source":"출처"}]'></textarea>
+
+        <!-- ① 엑셀 업로드 영역 -->
+        <div id="upload-excel">
+          <div class="alert alert-info" style="margin-bottom:16px">
+            📊 엑셀 파일(.xlsx)로 문제를 한 번에 업로드할 수 있습니다.<br>
+            <strong>양식 파일을 먼저 다운로드</strong>한 후 작성하여 업로드하세요.
+          </div>
+          <button class="btn btn-secondary" style="margin-bottom:16px" onclick="downloadExcelTemplate()">
+            ⬇️ 엑셀 양식 다운로드
+          </button>
+          <div class="upload-area" onclick="document.getElementById('xlsx-file-input').click()">
+            <div class="upload-icon">📂</div>
+            <div class="upload-text">엑셀 파일(.xlsx)을 클릭하여 업로드<br><small>양식에 맞게 작성된 파일만 가능합니다</small></div>
+            <input type="file" id="xlsx-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleXlsxUpload(event)">
+          </div>
+          <div id="xlsx-preview" class="mt-4"></div>
+          <div id="xlsx-apply-wrap" style="display:none;margin-top:12px">
+            <button class="btn btn-primary" onclick="applyXlsxData()">🔥 Firebase에 적용</button>
+          </div>
         </div>
-        <div class="flex gap-2">
-          <button class="btn btn-secondary" onclick="previewJson()">미리보기</button>
-          <button class="btn btn-primary" onclick="applyJson()">적용하기</button>
+
+        <!-- ② JSON 업로드 영역 -->
+        <div id="upload-json" style="display:none">
+          <div class="alert alert-info" style="margin-bottom:16px">JSON 형식의 퀴즈 파일을 업로드하거나 직접 붙여넣기 할 수 있습니다.</div>
+          <div class="upload-area" onclick="document.getElementById('quiz-file-input').click()">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">JSON 파일을 클릭하여 업로드<br><small>또는 아래에 직접 입력</small></div>
+            <input type="file" id="quiz-file-input" accept=".json" style="display:none" onchange="handleFileUpload(event)">
+          </div>
+          <div class="form-group" style="margin-top:16px">
+            <label>JSON 직접 입력</label>
+            <textarea id="json-paste" rows="8" placeholder='[{"id":1,"question":"문제 내용","options":["①","②","③","④","⑤"],"answer":0,"explanation":"해설","source":"출처"}]'></textarea>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary" onclick="previewJson()">미리보기</button>
+            <button class="btn btn-primary" onclick="applyJson()">적용하기</button>
+          </div>
         </div>
+
         <div id="upload-result" class="mt-4"></div>
       </div>
 
       <!-- Members -->
       <div id="admin-members" style="display:none">
         <div id="members-list"></div>
+      </div>
+
+      <!-- Ranking Management -->
+      <div id="admin-ranking-mgmt" style="display:none">
+        <div class="alert alert-info" style="margin-bottom:20px">
+          카테고리별 랭킹 데이터를 Firebase에서 영구 삭제합니다.<br>
+          <strong>삭제 후 복구가 불가능합니다.</strong>
+        </div>
+        <div class="ranking-reset-grid">
+          <div class="reset-card">
+            <div class="reset-card-label">5문제 랭킹</div>
+            <div class="reset-card-count" id="reset-count-5">-</div>
+            <button class="btn btn-danger btn-sm" onclick="resetRanking('5')">삭제</button>
+          </div>
+          <div class="reset-card">
+            <div class="reset-card-label">10문제 랭킹</div>
+            <div class="reset-card-count" id="reset-count-10">-</div>
+            <button class="btn btn-danger btn-sm" onclick="resetRanking('10')">삭제</button>
+          </div>
+          <div class="reset-card">
+            <div class="reset-card-label">20문제 랭킹</div>
+            <div class="reset-card-count" id="reset-count-20">-</div>
+            <button class="btn btn-danger btn-sm" onclick="resetRanking('20')">삭제</button>
+          </div>
+          <div class="reset-card">
+            <div class="reset-card-label">전체(50) 랭킹</div>
+            <div class="reset-card-count" id="reset-count-all">-</div>
+            <button class="btn btn-danger btn-sm" onclick="resetRanking('all')">삭제</button>
+          </div>
+        </div>
+        <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
+          <button class="btn btn-danger" style="width:100%" onclick="resetAllRankings()">
+            ⚠️ 전체 랭킹 모두 삭제
+          </button>
+        </div>
+        <div id="ranking-reset-result" class="mt-4"></div>
       </div>
     </div>
   </div>
@@ -1761,12 +1849,19 @@ async function loadRankingsByTab(countKey) {
 
 // ============ ADMIN ============
 function switchAdminTab(tab) {
-  ['quiz','upload','members'].forEach(t => {
-    document.getElementById(`atab-${t}`).classList.remove('active');
-    document.getElementById(`admin-${t}`).style.display = 'none';
+  ['quiz','upload','members','ranking-mgmt'].forEach(t => {
+    const atab = document.getElementById(`atab-${t}`);
+    const adiv = document.getElementById(`admin-${t}`);
+    if (atab) atab.classList.remove('active');
+    if (adiv) adiv.style.display = 'none';
   });
   document.getElementById(`atab-${tab}`).classList.add('active');
   document.getElementById(`admin-${tab}`).style.display = 'block';
+  if (tab === 'members') loadMembersList();
+  if (tab === 'upload')  switchUploadTab('excel');
+  if (tab === 'ranking-mgmt') loadRankingCounts();
+  if (tab === 'members') loadMembersList();
+  if (tab === 'upload')  switchUploadTab('excel'); // 항상 엑셀 탭 먼저
   if (tab === 'members') loadMembersList();
 }
 
@@ -1864,6 +1959,224 @@ async function deleteQuiz(idx) {
   } finally { setLoading(false); }
 }
 
+
+// ============ EXCEL UPLOAD / DOWNLOAD ============
+
+// 업로드 탭 전환
+function switchUploadTab(tab) {
+  ['excel','json'].forEach(t => {
+    document.getElementById(`utab-${t}`).classList.toggle('active', t === tab);
+    document.getElementById(`upload-${t}`).style.display = t === tab ? 'block' : 'none';
+  });
+}
+
+// 엑셀 양식 다운로드 (현재 Firebase 데이터 기반)
+async function downloadExcelTemplate() {
+  setLoading(true, '엑셀 양식 생성 중...');
+  try {
+    const questions = await getQuizData();
+    const WB = XLSX.utils.book_new();
+
+    // ── 데이터 시트 ──────────────────────────────────────────
+    const aoa = [
+      // 헤더
+      ['문제번호','문제','선택지①','선택지②','선택지③','선택지④','선택지⑤','정답번호(1~5)','해설','출처'],
+      // 설명행
+      ['숫자','문제 전체 입력','선택지① 내용','선택지② 내용','선택지③ 내용','선택지④ 내용','선택지⑤ 내용','1=①  2=②  3=③  4=④  5=⑤','해설 내용','참고 법령/출처'],
+    ];
+
+    questions.forEach((q, i) => {
+      aoa.push([
+        i + 1,
+        q.question || '',
+        q.options?.[0] || '',
+        q.options?.[1] || '',
+        q.options?.[2] || '',
+        q.options?.[3] || '',
+        q.options?.[4] || '',
+        (q.answer ?? 0) + 1,    // 내부 0-based → 표시 1-based
+        q.explanation || '',
+        q.source || '',
+      ]);
+    });
+
+    // 빈 양식이면 샘플 3행 추가
+    if (questions.length === 0) {
+      aoa.push([1,'(문제를 입력하세요)','선택지①','선택지②','선택지③','선택지④','선택지⑤',1,'해설','출처']);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // 열 너비 설정
+    ws['!cols'] = [
+      {wch:8},{wch:60},{wch:28},{wch:28},{wch:28},{wch:28},{wch:28},{wch:14},{wch:45},{wch:28}
+    ];
+
+    XLSX.utils.book_append_sheet(WB, ws, '퀴즈문제');
+
+    // ── 사용방법 시트 ─────────────────────────────────────────
+    const guide = [
+      ['📋 TPAC 퀴즈 문제 엑셀 업로드 가이드'],
+      [''],
+      ['■ 작성 규칙'],
+      ['1. 1행(헤더)과 2행(설명)은 수정하지 마세요. 데이터는 3행부터 입력하세요.'],
+      ['2. [문제번호]: 1부터 순번 (중복 불가)'],
+      ['3. [문제]: 문제 전체 내용'],
+      ['4. [선택지①~⑤]: 5개 모두 필수'],
+      ['5. [정답번호]: 1~5 숫자만 입력 (1=①, 2=②, 3=③, 4=④, 5=⑤)'],
+      ['6. [해설]: 정답 해설'],
+      ['7. [출처]: 참고 법령/교재명'],
+      [''],
+      ['■ 업로드 절차'],
+      ['1. 관리자 로그인 → 관리자 패널 → [문제 업로드] 탭'],
+      ['2. [엑셀 파일 업로드] 클릭 → 작성한 파일 선택'],
+      ['3. 미리보기 확인 후 [Firebase에 적용] 클릭'],
+      [''],
+      ['■ 주의사항'],
+      ['• 업로드 시 기존 Firebase 문제 데이터가 전체 교체됩니다.'],
+      ['• 빈 행은 자동으로 건너뜁니다.'],
+      ['• 정답번호가 1~5 범위를 벗어나면 오류 처리됩니다.'],
+    ];
+    const wsGuide = XLSX.utils.aoa_to_sheet(guide);
+    wsGuide['!cols'] = [{wch:70}];
+    XLSX.utils.book_append_sheet(WB, wsGuide, '사용방법');
+
+    // 다운로드
+    XLSX.writeFile(WB, 'TPAC_퀴즈문제_양식.xlsx');
+  } catch(e) {
+    alert('엑셀 생성 오류: ' + e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// 엑셀 파싱 후 미리보기
+let _parsedXlsxData = null;
+
+function handleXlsxUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const wb   = XLSX.read(ev.target.result, { type: 'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]]; // 첫 번째 시트(퀴즈문제)
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      // 3행부터 파싱 (1행=헤더, 2행=설명)
+      const questions = [];
+      const errors    = [];
+
+      for (let i = 2; i < rows.length; i++) {
+        const row = rows[i];
+        // 완전히 빈 행 skip
+        if (!row || row.every(c => c === '' || c === null || c === undefined)) continue;
+
+        const [num, question, o1, o2, o3, o4, o5, answerRaw, explanation, source] = row;
+        const answer = parseInt(answerRaw);
+
+        if (!question || String(question).trim() === '') {
+          errors.push(`${i+1}행: 문제 내용이 비어있습니다.`);
+          continue;
+        }
+        if (isNaN(answer) || answer < 1 || answer > 5) {
+          errors.push(`${i+1}행: 정답번호가 올바르지 않습니다 (입력값: "${answerRaw}")`);
+          continue;
+        }
+        const options = [o1,o2,o3,o4,o5].map(s => String(s).trim());
+        if (options.some(o => !o)) {
+          errors.push(`${i+1}행: 선택지가 부족합니다. (5개 모두 입력 필요)`);
+          continue;
+        }
+
+        questions.push({
+          id: questions.length + 1,
+          question: String(question).trim(),
+          options,
+          answer: answer - 1,   // 1-based → 0-based
+          explanation: String(explanation || '').trim(),
+          source: String(source || '').trim(),
+        });
+      }
+
+      _parsedXlsxData = questions;
+      renderXlsxPreview(questions, errors);
+    } catch(err) {
+      document.getElementById('xlsx-preview').innerHTML =
+        `<div class="alert alert-error">❌ 파일 파싱 오류: ${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  // 파일 input 초기화 (같은 파일 재업로드 허용)
+  e.target.value = '';
+}
+
+function renderXlsxPreview(questions, errors) {
+  const preview = document.getElementById('xlsx-preview');
+  const applyWrap = document.getElementById('xlsx-apply-wrap');
+
+  let html = '';
+
+  if (errors.length > 0) {
+    html += `<div class="alert alert-error" style="margin-bottom:12px">
+      ⚠️ <strong>${errors.length}개 오류 발생</strong> (해당 행은 제외됩니다)<br>
+      <ul style="margin:8px 0 0 16px;font-size:0.85rem">${errors.map(e=>`<li>${e}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  if (questions.length === 0) {
+    html += `<div class="alert alert-error">❌ 유효한 문제가 없습니다. 양식을 확인해주세요.</div>`;
+    applyWrap.style.display = 'none';
+    preview.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="alert alert-success">✅ <strong>${questions.length}개</strong> 문제를 파싱했습니다. 아래에서 확인 후 Firebase에 적용하세요.</div>`;
+  html += `<div style="max-height:320px;overflow-y:auto;margin-top:10px;border:1px solid var(--border);border-radius:10px;">`;
+  const nums = ['①','②','③','④','⑤'];
+  questions.slice(0, 20).forEach((q, i) => {
+    html += `<div class="quiz-item-admin" style="flex-direction:column;align-items:flex-start;gap:6px;padding:14px 16px">
+      <div style="display:flex;gap:10px;width:100%">
+        <span class="quiz-item-num">Q${i+1}</span>
+        <span style="flex:1;font-size:0.9rem;color:var(--text)">${q.question.length>80?q.question.slice(0,80)+'…':q.question}</span>
+        <span style="color:var(--success);font-size:0.85rem;white-space:nowrap">정답: ${nums[q.answer]}</span>
+      </div>
+    </div>`;
+  });
+  if (questions.length > 20) {
+    html += `<div style="text-align:center;padding:10px;color:var(--text2);font-size:0.85rem">... 외 ${questions.length-20}개</div>`;
+  }
+  html += '</div>';
+
+  preview.innerHTML = html;
+  applyWrap.style.display = 'block';
+}
+
+async function applyXlsxData() {
+  if (!_parsedXlsxData || _parsedXlsxData.length === 0) {
+    alert('적용할 데이터가 없습니다.');
+    return;
+  }
+  if (!confirm(`${_parsedXlsxData.length}개 문제로 Firebase를 업데이트하시겠습니까?\n기존 문제 데이터가 전체 교체됩니다.`)) return;
+
+  setLoading(true, 'Firebase에 저장 중...');
+  try {
+    await saveQuizData(_parsedXlsxData);
+    document.getElementById('upload-result').innerHTML =
+      `<div class="alert alert-success">✅ ${_parsedXlsxData.length}개 문제가 Firebase에 저장되었습니다!</div>`;
+    _parsedXlsxData = null;
+    document.getElementById('xlsx-preview').innerHTML = '';
+    document.getElementById('xlsx-apply-wrap').style.display = 'none';
+    await loadAdminQuizList();
+    switchAdminTab('quiz');
+  } catch(e) {
+    document.getElementById('upload-result').innerHTML =
+      `<div class="alert alert-error">❌ 저장 오류: ${e.message}</div>`;
+  } finally {
+    setLoading(false);
+  }
+}
+
 function handleFileUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1947,6 +2260,55 @@ async function loadMembersList() {
   } catch(e) {
     console.error('Members load error:', e);
     container.innerHTML = `<div class="alert alert-error">회원 목록을 불러오지 못했습니다.<br><small>${e.message}</small></div>`;
+  }
+}
+
+
+// ============ RANKING MANAGEMENT (Admin) ============
+async function loadRankingCounts() {
+  const keys = ['5','10','20','all'];
+  for (const k of keys) {
+    const el = document.getElementById(`reset-count-${k}`);
+    if (!el) continue;
+    el.textContent = '조회 중...';
+    try {
+      const cnt = await window.FB.getRankingCount(k);
+      el.textContent = `${cnt}명`;
+    } catch(e) {
+      el.textContent = '오류';
+    }
+  }
+}
+
+async function resetRanking(countKey) {
+  const labels = {'5':'5문제','10':'10문제','20':'20문제','all':'전체(50)'};
+  if (!confirm(`[${labels[countKey]}] 랭킹을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+  setLoading(true, '삭제 중...');
+  const resultEl = document.getElementById('ranking-reset-result');
+  try {
+    await window.FB.resetRankingByCount(countKey);
+    resultEl.innerHTML = `<div class="alert alert-success">✅ [${labels[countKey]}] 랭킹이 삭제되었습니다.</div>`;
+    await loadRankingCounts();
+  } catch(e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ 삭제 오류: ${e.message}</div>`;
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function resetAllRankings() {
+  if (!confirm('⚠️ 모든 카테고리의 랭킹을 전부 삭제하시겠습니까?\n이 작업은 절대 되돌릴 수 없습니다.')) return;
+  if (!confirm('정말로 삭제하시겠습니까? 마지막 확인입니다.')) return;
+  setLoading(true, '전체 삭제 중...');
+  const resultEl = document.getElementById('ranking-reset-result');
+  try {
+    await window.FB.resetAllRankings();
+    resultEl.innerHTML = `<div class="alert alert-success">✅ 전체 랭킹이 삭제되었습니다.</div>`;
+    await loadRankingCounts();
+  } catch(e) {
+    resultEl.innerHTML = `<div class="alert alert-error">❌ 삭제 오류: ${e.message}</div>`;
+  } finally {
+    setLoading(false);
   }
 }
 
